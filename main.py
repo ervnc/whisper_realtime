@@ -10,7 +10,7 @@ from threading import Thread
 
 def process_audio(audio_model, data_queue):
   transcription = ""
-  print("Modelo carregado. Transcrição em tempo real começando...\n")
+  print("Modelo carregado. Transcrição em tempo real...\n")
 
   while True:
       if not data_queue.empty():
@@ -18,7 +18,7 @@ def process_audio(audio_model, data_queue):
 
         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
 
-        # Realizar a transcrição
+        # Transcrição
         result = audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())
         text = result['text'].strip()
 
@@ -28,14 +28,11 @@ def process_audio(audio_model, data_queue):
 
       sleep(0.25)
 
-
-
 def main(model_name):
     audio_model = whisper.load_model(model_name)
 
-    # Inicializar o recognizer do SpeechRecognition
     recognizer = sr.Recognizer()
-    recognizer.energy_threshold = 1000  # Ajustar o nível de energia do microfone
+    recognizer.energy_threshold = 1000
     recognizer.dynamic_energy_threshold = False
 
     # Listar os dispositivos de microfone disponíveis
@@ -54,11 +51,10 @@ def main(model_name):
         data = audio.get_raw_data()
         data_queue.put(data)
 
-    # Ajustar microfone para o ambiente
     with mic:
         recognizer.adjust_for_ambient_noise(mic)
 
-    # Iniciar a captura de áudio em segundo plano
+    # Captura de áudio em segundo plano
     recognizer.listen_in_background(mic, record_callback)    
 
     processing_thread = Thread(target=process_audio, args=(audio_model, data_queue))
@@ -73,7 +69,8 @@ def main(model_name):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Transcrição de áudio em tempo real")
-  parser.add_argument("--model", type=str, default="tiny", help="Nome do modelo (ex: tiny, base)")
+  # Modelo inicial: tiny
+  parser.add_argument("--model", type=str, default="tiny", help="Nome do modelo (ex: tiny, base, small)")
 
   args = parser.parse_args()
 
