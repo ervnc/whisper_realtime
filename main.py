@@ -1,39 +1,48 @@
 from faster_whisper import WhisperModel
-import wave
 import pyaudio
-import os
+import numpy as np
+import webrtcvad
 
-def process_audio(py, stream, file_path, chunk_length=5):
+def process_audio(py, stream, chunk_length=2):
     frames = []
     num_frames = int(16000 * chunk_length / 1024)
-    print(num_frames)
-    for _ in range(0, num_frames):
+    for _ in range(num_frames):
         try:
-            data = stream.read(1024)
+            data = stream.read(1024, exception_on_overflow=False)
             frames.append(data)
         except Exception as e:
             print(f"Erro na leitura do stream: {e}")
             continue
-    print(f"Número de frames capturados: {len(frames)}")
 
-    wf = wave.open(file_path, 'wb')
-    wf.setnchannels(1)
-    wf.setsampwidth(py.get_sample_size(pyaudio.paInt16))
-    wf.setframerate(16000)
-    wf.writeframes(b''.join(frames))
-    wf.close()
+    audio_data = b''.join(frames)
+    return audio_data
 
-def transcribe_chunk(model, chunk_file):
-    segments, info = model.transcribe(chunk_file, beam_size=5)
-    print("Detected language '%s' with probability %f" % (info.language, info.language_probability))
+def is_speech(audio_data, sample_rate=16000):
+    vad = webrtcvad.Vad(3)
+    frame_duration = 30
+    frame_size = int(sample_rate * frame_duration / 1000) * 2 
+
+    is_speech_detected = False
+    for i in range(0, len(audio_data) - frame_size + 1, frame_size):
+        frame = audio_data[i:i + frame_size]
+        if len(frame) < frame_size:
+            continue
+        if vad.is_speech(frame, sample_rate):
+            is_speech_detected = True
+            break
+    return is_speech_detected
+
+def transcribe_chunk(model, audio_data):
+    audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+    segments, info = model.transcribe(audio_np, beam_size=5)
     transcription = ""
     for segment in segments:
         transcription += "%s\n" % (segment.text)
-        print("Transcription: %s" % segment.text)
+        print("Transcrição: %s" % segment.text)
     return transcription
 
 def main():
-    model_size = "tiny.en"
+    model_size = "small.en"
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
     py = pyaudio.PyAudio()
@@ -48,17 +57,18 @@ def main():
 
     try:
         while True:
-            chunk_file = "chunk.wav"
-            process_audio(py, stream, chunk_file)
+            audio_data = process_audio(py, stream, chunk_length=2)
 
-            if os.path.exists(chunk_file):
-                transcription = transcribe_chunk(model, chunk_file)
-                print(transcription)
-                os.remove(chunk_file)
-
-                a_transcription += transcription + " "
+            if audio_data:
+                if is_speech(audio_data):
+                    transcription = transcribe_chunk(model, audio_data)
+                    if transcription.strip():
+                        print(transcription)
+                        a_transcription += transcription + " "
+                else:
+                    print("Silêncio detectado")
             else:
-                print("Arquivo não encontrado")
+                print("Nenhum dado de áudio recebido")
     except KeyboardInterrupt:
         print("Transcrição finalizada")
     finally:
